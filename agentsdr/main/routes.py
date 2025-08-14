@@ -1,7 +1,7 @@
 from flask import render_template, redirect, url_for, flash, request, session
 from flask_login import login_required, current_user
 from agentsdr.main import main_bp
-from agentsdr.core.supabase_client import get_supabase
+from agentsdr.core.supabase_client import get_supabase, get_service_supabase
 from agentsdr.core.rbac import get_user_organizations
 
 @main_bp.route('/')
@@ -124,4 +124,50 @@ def org_dashboard(org_slug):
     
     except Exception as e:
         flash('Error loading organization dashboard.', 'error')
+        return redirect(url_for('main.dashboard'))
+
+
+@main_bp.route('/agents')
+@login_required
+def all_agents():
+    """Show all agents across all organizations the user has access to"""
+    try:
+        supabase = get_service_supabase()
+
+        # Get all organizations where user is a member
+        memberships = supabase.table('organization_members').select('org_id, role').eq('user_id', current_user.id).execute()
+
+        if not memberships.data and not current_user.is_super_admin:
+            flash('You are not a member of any organizations.', 'info')
+            return render_template('main/all_agents.html', agents=[], organizations={})
+
+        # Collect organization IDs
+        org_ids = [m['org_id'] for m in memberships.data] if memberships.data else []
+
+        # If super admin, get all organizations
+        if current_user.is_super_admin:
+            all_orgs = supabase.table('organizations').select('id').execute()
+            org_ids.extend([org['id'] for org in all_orgs.data if org['id'] not in org_ids])
+
+        # Get organization details
+        organizations = {}
+        if org_ids:
+            orgs_response = supabase.table('organizations').select('id, name, slug').in_('id', org_ids).execute()
+            for org in orgs_response.data:
+                organizations[org['id']] = org
+
+        # Get all agents from these organizations
+        agents = []
+        if org_ids:
+            agents_response = supabase.table('agents').select('*').in_('org_id', org_ids).order('created_at', desc=True).execute()
+            agents = agents_response.data or []
+
+        # Add organization info to each agent
+        for agent in agents:
+            agent['organization'] = organizations.get(agent['org_id'], {'name': 'Unknown', 'slug': 'unknown'})
+
+        return render_template('main/all_agents.html', agents=agents, organizations=organizations)
+
+    except Exception as e:
+        flash('Error loading agents.', 'error')
         return redirect(url_for('main.dashboard'))

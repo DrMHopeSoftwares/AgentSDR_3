@@ -19,6 +19,7 @@ class GmailService:
         self.client_id = os.getenv('GMAIL_CLIENT_ID')
         self.client_secret = os.getenv('GMAIL_CLIENT_SECRET')
         self.openai_api_key = os.getenv('OPENAI_API_KEY')
+        self._service_cache = {}  # Cache Gmail service instances
     
     def get_access_token(self, refresh_token: str) -> str:
         """Get a fresh access token using refresh token"""
@@ -59,18 +60,21 @@ class GmailService:
         """Build Gmail API service with fresh credentials"""
         try:
             current_app.logger.info("Building Gmail service")
-            access_token = self.get_access_token(refresh_token)
             
+            # Create credentials with refresh token - let Google API client handle token refresh
             credentials = Credentials(
-                token=access_token,
+                token=None,  # Let it refresh automatically
                 refresh_token=refresh_token,
                 client_id=self.client_id,
                 client_secret=self.client_secret,
                 token_uri='https://oauth2.googleapis.com/token'
             )
             
-            # Set up automatic token refresh (don't refresh now, let it refresh when needed)
-            # credentials.refresh(Request())
+            # Refresh the token if needed
+            if not credentials.valid:
+                current_app.logger.info("Credentials not valid, refreshing...")
+                credentials.refresh(Request())
+                current_app.logger.info("Credentials refreshed successfully")
             
             service = build('gmail', 'v1', credentials=credentials)
             current_app.logger.info("Gmail service built successfully")
@@ -78,6 +82,8 @@ class GmailService:
             
         except Exception as e:
             current_app.logger.error(f"Error building Gmail service: {e}")
+            import traceback
+            current_app.logger.error(f"Full traceback: {traceback.format_exc()}")
             raise
     
     def get_query_for_criteria(self, criteria_type: str, count: int = 10) -> str:
@@ -103,20 +109,38 @@ class GmailService:
             query = self.get_query_for_criteria(criteria_type, count)
             current_app.logger.info(f"Using Gmail query: {query}")
             
-            # Get message IDs
-            if criteria_type == 'oldest_n':
-                # Fetch a bit more to allow sorting by oldest then slice
-                results = service.users().messages().list(
-                    userId='me',
-                    q=query,
-                    maxResults=min(max(count * 3, count), 100)
-                ).execute()
-            else:
-                results = service.users().messages().list(
-                    userId='me',
-                    q=query,
-                    maxResults=count
-                ).execute()
+            # Get message IDs with retry logic
+            max_retries = 3
+            retry_count = 0
+            results = None
+            
+            while retry_count < max_retries:
+                try:
+                    if criteria_type == 'oldest_n':
+                        # Fetch a bit more to allow sorting by oldest then slice
+                        results = service.users().messages().list(
+                            userId='me',
+                            q=query,
+                            maxResults=min(max(count * 3, count), 100)
+                        ).execute()
+                    else:
+                        results = service.users().messages().list(
+                            userId='me',
+                            q=query,
+                            maxResults=count
+                        ).execute()
+                    break
+                except Exception as list_error:
+                    retry_count += 1
+                    if retry_count >= max_retries:
+                        current_app.logger.error(f"Failed to list messages after {max_retries} retries")
+                        raise list_error
+                    
+                    # Exponential backoff: 2^retry_count seconds
+                    wait_time = 2 ** retry_count
+                    current_app.logger.warning(f"Gmail API error, waiting {wait_time}s before retry {retry_count}: {list_error}")
+                    import time
+                    time.sleep(wait_time)
             
             messages = results.get('messages', [])
             current_app.logger.info(f"Found {len(messages)} messages")
@@ -130,18 +154,36 @@ class GmailService:
             for i, message in enumerate(messages):
                 try:
                     current_app.logger.info(f"Fetching message {i+1}/{len(messages)}: {message['id']}")
-                    msg = service.users().messages().get(
-                        userId='me',
-                        id=message['id'],
-                        format='full'
-                    ).execute()
                     
-                    email_data = self.parse_email(msg)
-                    if email_data:
-                        emails.append(email_data)
+                    # Add retry logic for individual message fetching
+                    max_retries = 3
+                    retry_count = 0
+                    msg = None
+                    
+                    while retry_count < max_retries:
+                        try:
+                            msg = service.users().messages().get(
+                                userId='me',
+                                id=message['id'],
+                                format='full'
+                            ).execute()
+                            break
+                        except Exception as fetch_error:
+                            retry_count += 1
+                            if retry_count >= max_retries:
+                                raise fetch_error
+                            current_app.logger.warning(f"Retry {retry_count} for message {message['id']}: {fetch_error}")
+                            import time
+                            time.sleep(1)  # Wait 1 second before retry
+                    
+                    if msg:
+                        email_data = self.parse_email(msg)
+                        if email_data:
+                            emails.append(email_data)
                         
                 except Exception as e:
-                    current_app.logger.error(f"Error fetching message {message['id']}: {e}")
+                    current_app.logger.error(f"Error fetching message {message['id']} after retries: {e}")
+                    # Don't fail completely, just skip this message
                     continue
             
             # Sort emails based on criteria

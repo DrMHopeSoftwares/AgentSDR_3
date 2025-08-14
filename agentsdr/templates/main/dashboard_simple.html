@@ -97,14 +97,10 @@
                             </span>
                         </div>
                         <div class="space-y-3">
-                            <a href="{{ url_for('main.org_dashboard', org_slug=org_data.org.slug) }}"
-                               class="btn-gradient w-full text-center py-3 px-4 rounded-lg font-semibold transition-all duration-300 hover:scale-105 block">
-                                📊 View Dashboard
-                            </a>
                             {% if org_data.role == 'admin' %}
                             <a href="/orgs/{{ org_data.org.slug }}/members"
                                class="w-full text-center py-3 px-4 rounded-lg font-semibold bg-gray-100 text-gray-700 hover:bg-gray-200 transition-all duration-300 hover:scale-105 block">
-                                👥 Manage Members
+                                👥 Manage Organization
                             </a>
                             {% endif %}
                         </div>

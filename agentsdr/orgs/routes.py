@@ -560,6 +560,51 @@ def gmail_callback_handler():
 
 
 
+@orgs_bp.route('/<org_slug>/agents/<agent_id>/emails/test', methods=['POST'])
+@require_org_member('org_slug')
+def test_gmail_connection(org_slug, agent_id):
+    """Test Gmail connection without full email processing"""
+    try:
+        current_app.logger.info(f"Testing Gmail connection for agent {agent_id}")
+        supabase = get_service_supabase()
+
+        # Get agent and verify it's an email_summarizer
+        agent_resp = supabase.table('agents').select('*').eq('id', agent_id).execute()
+        if not agent_resp.data:
+            return jsonify({'error': 'Agent not found'}), 404
+
+        agent = agent_resp.data[0]
+        if agent['agent_type'] != 'email_summarizer':
+            return jsonify({'error': 'Agent is not an email summarizer'}), 400
+
+        config = agent.get('config', {})
+        refresh_token = config.get('gmail_refresh_token')
+
+        if not refresh_token:
+            return jsonify({'error': 'Gmail not connected'}), 400
+
+        # Just test the connection by getting basic profile info
+        from agentsdr.services.gmail_service import GmailService
+        gmail_service = GmailService()
+        service = gmail_service.build_gmail_service(refresh_token)
+        
+        # Test with a simple profile call
+        profile = service.users().getProfile(userId='me').execute()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Gmail connection working',
+            'email': profile.get('emailAddress'),
+            'total_messages': profile.get('messagesTotal', 0)
+        })
+
+    except Exception as e:
+        current_app.logger.error(f"Error testing Gmail connection: {e}")
+        import traceback
+        current_app.logger.error(f"Full traceback: {traceback.format_exc()}")
+        return jsonify({'error': str(e)}), 500
+
+
 @orgs_bp.route('/<org_slug>/agents/<agent_id>/emails/summarize', methods=['POST'])
 @require_org_member('org_slug')
 def summarize_emails(org_slug, agent_id):
@@ -608,11 +653,20 @@ def summarize_emails(org_slug, agent_id):
             summaries = fetch_and_summarize_emails(refresh_token, criteria_type, count)
             
             current_app.logger.info(f"Email summarization completed successfully with {len(summaries)} summaries")
+
+            # Store summaries in session for the dedicated summaries page
+            from flask import session
+            session[f'summaries_{agent_id}'] = {
+                'summaries': summaries,
+                'criteria_type': criteria_type,
+                'count': count,
+                'timestamp': datetime.utcnow().isoformat()
+            }
+
             return jsonify({
                 'success': True,
-                'summaries': summaries,
-                'count': len(summaries),
-                'message': 'No emails matched the selected criteria' if not summaries else None
+                'redirect_url': url_for('orgs.view_summaries', org_slug=org_slug, agent_id=agent_id),
+                'count': len(summaries)
             })
             
         except Exception as fetch_error:
@@ -631,6 +685,51 @@ def summarize_emails(org_slug, agent_id):
         current_app.logger.error(f"Full traceback: {traceback.format_exc()}")
         return jsonify({'error': 'An unexpected error occurred. Please try again.'}), 500
 
+
+@orgs_bp.route('/<org_slug>/agents/<agent_id>/summaries', methods=['GET'])
+@require_org_member('org_slug')
+def view_summaries(org_slug, agent_id):
+    """View email summaries page"""
+    try:
+        supabase = get_service_supabase()
+
+        # Get organization
+        org_resp = supabase.table('organizations').select('*').eq('slug', org_slug).limit(1).execute()
+        if not org_resp.data:
+            flash('Organization not found.', 'error')
+            return redirect(url_for('main.dashboard'))
+        organization = org_resp.data[0]
+
+        # Get agent
+        agent_resp = supabase.table('agents').select('*').eq('id', agent_id).eq('org_id', organization['id']).execute()
+        if not agent_resp.data:
+            flash('Agent not found.', 'error')
+            return redirect(url_for('orgs.list_agents', org_slug=org_slug))
+        agent = agent_resp.data[0]
+
+        # Check if Gmail is connected for email_summarizer agents
+        gmail_connected = False
+        if agent['agent_type'] == 'email_summarizer':
+            config = agent.get('config', {})
+            gmail_connected = bool(config.get('gmail_refresh_token'))
+
+        # Get summaries from session
+        from flask import session
+        summaries_data = session.get(f'summaries_{agent_id}', {})
+        summaries = summaries_data.get('summaries', [])
+        criteria_type = summaries_data.get('criteria_type', 'last_24_hours')
+
+        return render_template('orgs/email_summaries.html',
+                             organization=organization,
+                             agent=agent,
+                             gmail_connected=gmail_connected,
+                             summaries=summaries,
+                             criteria_type=criteria_type)
+
+    except Exception as e:
+        current_app.logger.error(f"Error viewing summaries: {e}")
+        flash('Error loading summaries.', 'error')
+        return redirect(url_for('orgs.view_agent', org_slug=org_slug, agent_id=agent_id))
 
 
 @orgs_bp.route('/<org_slug>/agents/<agent_id>', methods=['DELETE'])

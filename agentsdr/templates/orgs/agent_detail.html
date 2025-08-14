@@ -5,15 +5,13 @@
 {% block content %}
 <div class="space-y-8" x-data="{
     fetchingEmails: false,
+    testing: false,
     fetchCriteria: 'last_24_hours',
     customCount: 10,
-    summaries: [],
-    showSummaries: false,
     error: null,
     fetchAndSummarizeEmails() {
         this.fetchingEmails = true;
         this.error = null;
-        this.showSummaries = false;
 
         const criteria = {
             type: this.fetchCriteria,
@@ -38,12 +36,12 @@
         .then(data => {
             if (data.error) {
                 this.error = data.error;
-            } else {
-                this.summaries = data.summaries || [];
-                this.showSummaries = true;
-                if (this.summaries.length > 0) {
-                    showToast(`Summarized ${this.summaries.length} emails`, 'success');
-                }
+            } else if (data.redirect_url) {
+                // Redirect to the dedicated summaries page
+                showToast(`Found ${data.count} emails. Redirecting to summaries...`, 'success');
+                setTimeout(() => {
+                    window.location.href = data.redirect_url;
+                }, 1000);
             }
         })
         .catch(error => {
@@ -52,6 +50,37 @@
         })
         .finally(() => {
             this.fetchingEmails = false;
+        });
+    },
+    testConnection() {
+        this.testing = true;
+        this.error = null;
+        
+        fetch(`/orgs/{{ organization.slug }}/agents/{{ agent.id }}/emails/test`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.success) {
+                showToast(`✓ Gmail connection working! Email: ${data.email}, Total messages: ${data.total_messages}`, 'success');
+            } else {
+                this.error = data.error || 'Connection test failed';
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            this.error = `Connection test failed: ${error.message}`;
+        })
+        .finally(() => {
+            this.testing = false;
         });
     }
 }">
@@ -111,14 +140,22 @@
         {% else %}
         <!-- Gmail Connected - Email Fetching Options -->
         <div class="space-y-6">
-            <div class="flex items-center space-x-3 p-4 bg-green-50 rounded-lg border border-green-200">
-                <div class="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center">
-                    <span class="text-white text-sm">✓</span>
+            <div class="flex items-center justify-between p-4 bg-green-50 rounded-lg border border-green-200">
+                <div class="flex items-center space-x-3">
+                    <div class="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center">
+                        <span class="text-white text-sm">✓</span>
+                    </div>
+                    <div>
+                        <h4 class="font-semibold text-green-800">Gmail Connected</h4>
+                        <p class="text-green-600 text-sm">Your Gmail account is connected and ready to use.</p>
+                    </div>
                 </div>
-                <div>
-                    <h4 class="font-semibold text-green-800">Gmail Connected</h4>
-                    <p class="text-green-600 text-sm">Your Gmail account is connected and ready to use.</p>
-                </div>
+                <button @click="testConnection()" 
+                        :disabled="testing"
+                        class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm">
+                    <span x-show="!testing">Test Connection</span>
+                    <span x-show="testing">Testing...</span>
+                </button>
             </div>
 
             <!-- Email Fetching Options -->
@@ -194,30 +231,7 @@
                 </div>
             </div>
 
-            <!-- Email Summaries Display -->
-            <div x-show="showSummaries && summaries.length > 0" class="space-y-4">
-                <h4 class="text-lg font-semibold text-gray-900">📩 Email Summaries</h4>
-                <div class="space-y-3 max-h-96 overflow-y-auto">
-                    <template x-for="summary in summaries" :key="summary.id">
-                        <div class="card bg-gray-50 rounded-lg p-4 hover:shadow-md transition-all duration-200">
-                            <div class="flex items-start justify-between mb-2">
-                                <h5 class="font-semibold text-gray-900" x-text="`📩 From ${summary.sender} — ${summary.subject}`"></h5>
-                                <span class="text-sm text-gray-500" x-text="summary.date"></span>
-                            </div>
-                            <p class="text-gray-700" x-text="summary.summary"></p>
-                        </div>
-                    </template>
-                </div>
-            </div>
 
-            <!-- No Emails Found -->
-            <div x-show="showSummaries && summaries.length === 0" class="text-center py-8">
-                <div class="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <span class="text-2xl">📭</span>
-                </div>
-                <h3 class="text-lg font-medium text-gray-900 mb-2">No Emails Found</h3>
-                <p class="text-gray-500">No emails match the selected criteria.</p>
-            </div>
         </div>
         {% endif %}
     </div>
