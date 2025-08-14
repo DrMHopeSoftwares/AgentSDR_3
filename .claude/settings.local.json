@@ -3,7 +3,8 @@
     "allow": [
       "Bash(python:*)",
       "Bash(timeout:*)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(npm run build:*)"
     ],
     "deny": [],
     "ask": []

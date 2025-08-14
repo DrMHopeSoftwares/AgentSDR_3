@@ -4,15 +4,25 @@
 
 {% block content %}
 <div class="space-y-6">
-    <!-- Welcome Section -->
-    <div class="bg-white shadow rounded-lg">
-        <div class="px-4 py-5 sm:p-6">
-            <h3 class="text-lg leading-6 font-medium text-secondary-900">
-                Welcome back, {{ current_user.display_name or current_user.email }}!
-            </h3>
-            <p class="mt-1 text-sm text-secondary-500">
-                Manage your organizations and data from your personal dashboard.
-            </p>
+    <!-- Enhanced Welcome Section -->
+    <div class="card-gradient rounded-xl shadow-lg overflow-hidden">
+        <div class="px-6 py-8 sm:p-8 relative">
+            <div class="flex items-center space-x-4">
+                <div class="flex-shrink-0">
+                    <div class="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-sm">
+                        <span class="text-2xl">👋</span>
+                    </div>
+                </div>
+                <div>
+                    <h3 class="text-2xl font-bold text-white">
+                        Welcome back, {{ current_user.display_name or current_user.email }}!
+                    </h3>
+                    <p class="mt-2 text-white/90 text-lg">
+                        Manage your organizations and data from your personal dashboard.
+                    </p>
+                </div>
+            </div>
+            <div class="absolute top-4 right-4 text-white/10 text-6xl float-up">⭐</div>
         </div>
     </div>
 
@@ -29,27 +39,34 @@
             </div>
             
             {% if organizations %}
-            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 reveal-list">
                 {% for org_data in organizations %}
-                <div class="card">
-                    <div class="card-body">
-                        <div class="flex items-center justify-between">
-                            <h4 class="text-lg font-medium text-secondary-900">{{ org_data.org.name }}</h4>
-                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium 
-                                       {% if org_data.role == 'admin' %}bg-blue-100 text-blue-800{% else %}bg-green-100 text-green-800{% endif %}">
-                                {{ org_data.role }}
+                <div class="card bg-white rounded-xl shadow-lg border-0 overflow-hidden hover:shadow-2xl transition-all duration-300">
+                    <div class="p-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <div class="flex items-center space-x-3">
+                                <div class="w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-500 rounded-lg flex items-center justify-center">
+                                    <span class="text-white font-bold text-lg">{{ org_data.org.name[0].upper() }}</span>
+                                </div>
+                                <div>
+                                    <h4 class="text-xl font-bold text-gray-900">{{ org_data.org.name }}</h4>
+                                    <p class="text-sm text-gray-500">{{ org_data.org.slug }}</p>
+                                </div>
+                            </div>
+                            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold
+                                       {% if org_data.role == 'admin' %}bg-gradient-to-r from-blue-500 to-purple-600 text-white{% else %}bg-gradient-to-r from-green-500 to-teal-600 text-white{% endif %}">
+                                {{ org_data.role.title() }}
                             </span>
                         </div>
-                        <p class="mt-1 text-sm text-secondary-500">{{ org_data.org.slug }}</p>
-                        <div class="mt-4 flex space-x-2">
-                            <a href="{{ url_for('main.org_dashboard', org_slug=org_data.org.slug) }}" 
-                               class="btn btn-primary text-sm">
-                                View Dashboard
+                        <div class="flex space-x-3">
+                            <a href="{{ url_for('main.org_dashboard', org_slug=org_data.org.slug) }}"
+                               class="btn-gradient flex-1 text-center py-2 px-4 rounded-lg font-semibold text-sm transition-all duration-300 hover:scale-105">
+                                📊 Dashboard
                             </a>
                             {% if org_data.role == 'admin' %}
-                            <a href="{{ url_for('orgs.list_members', org_slug=org_data.org.slug) }}" 
-                               class="btn btn-secondary text-sm">
-                                Manage Members
+                            <a href="{{ url_for('orgs.list_members', org_slug=org_data.org.slug) }}"
+                               class="flex-1 text-center py-2 px-4 rounded-lg font-semibold text-sm bg-gray-100 text-gray-700 hover:bg-gray-200 transition-all duration-300 hover:scale-105">
+                                👥 Members
                             </a>
                             {% endif %}
                         </div>

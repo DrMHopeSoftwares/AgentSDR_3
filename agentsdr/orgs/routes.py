@@ -1,10 +1,12 @@
-from flask import render_template, redirect, url_for, flash, request, jsonify
+from flask import render_template, redirect, url_for, flash, request, jsonify, current_app
 from flask_login import login_required, current_user
 from agentsdr.orgs import orgs_bp
 from agentsdr.core.supabase_client import get_supabase, get_service_supabase
 from agentsdr.core.rbac import require_org_admin, require_org_member, is_org_admin
 from agentsdr.core.email import get_email_service
 from agentsdr.core.models import CreateOrganizationRequest, UpdateOrganizationRequest, CreateInvitationRequest
+from agentsdr.services.gmail_service import fetch_and_summarize_emails
+
 from datetime import datetime, timedelta
 import uuid
 import secrets
@@ -23,7 +25,16 @@ def create_organization():
             current_app.logger.info(f"Creating organization with data: {data}")
             current_app.logger.info(f"Current user: {current_user.id} ({current_user.email})")
 
-            org_request = CreateOrganizationRequest(**data)
+            # Remove CSRF token from data before validation
+            org_data = {k: v for k, v in data.items() if k != 'csrf_token'}
+            current_app.logger.info(f"Filtered organization data: {org_data}")
+
+            try:
+                org_request = CreateOrganizationRequest(**org_data)
+                current_app.logger.info(f"Validation successful: name={org_request.name}, slug={org_request.slug}")
+            except Exception as validation_error:
+                current_app.logger.error(f"Validation error: {validation_error}")
+                raise validation_error
 
             supabase = get_service_supabase()
 
@@ -80,7 +91,17 @@ def create_organization():
             current_app.logger.error(f"Error creating organization: {e}")
             import traceback
             traceback.print_exc()
-            return jsonify({'error': f'Error creating organization: {str(e)}'}), 400
+
+            # Handle Pydantic validation errors specifically
+            if hasattr(e, 'errors'):
+                validation_errors = []
+                for error in e.errors():
+                    field = error.get('loc', ['unknown'])[0]
+                    message = error.get('msg', 'Invalid value')
+                    validation_errors.append(f"{field}: {message}")
+                return jsonify({'error': f'Validation error: {", ".join(validation_errors)}'}), 400
+
+            return jsonify({'error': f'Error creating organization: {str(e)}'}), 500
 
     return render_template('orgs/create.html')
 
@@ -197,27 +218,40 @@ def delete_organization(org_slug):
 def create_agent(org_slug):
     """Create an agent for the organization. Types: email_summarizer | hubspot_data | custom"""
     try:
+        current_app.logger.info(f"Creating agent for org: {org_slug}")
+        current_app.logger.info(f"Request content type: {request.content_type}")
+        current_app.logger.info(f"Request is_json: {request.is_json}")
+
         # Accept JSON or form-encoded payloads robustly
         if request.is_json:
             data = request.get_json(silent=True) or {}
         else:
             data = request.form.to_dict() or {}
+
+        current_app.logger.info(f"Received data: {data}")
+
         name = (data.get('name') or '').strip()
         agent_type = (data.get('type') or '').strip()
+
+        current_app.logger.info(f"Parsed name: '{name}', agent_type: '{agent_type}'")
+
         if not name or not agent_type:
+            current_app.logger.error(f"Missing required fields: name='{name}', type='{agent_type}'")
             return jsonify({'error': 'Name and type are required'}), 400
         if agent_type not in ['email_summarizer', 'hubspot_data', 'custom']:
+            current_app.logger.error(f"Invalid agent type: '{agent_type}'")
             return jsonify({'error': 'Invalid agent type'}), 400
 
         supabase = get_service_supabase()
         # Resolve slug -> id
         org_resp = supabase.table('organizations').select('id').eq('slug', org_slug).limit(1).execute()
         if not org_resp.data:
+            current_app.logger.error(f"Organization not found: {org_slug}")
             return jsonify({'error': 'Organization not found'}), 404
         org_id = org_resp.data[0]['id']
+        current_app.logger.info(f"Found organization ID: {org_id}")
 
-        # For now, store agents in records table as placeholder
-        # title=name, content=JSON metadata, type='agent'
+        # Create agent record
         import json, uuid
         now = datetime.utcnow().isoformat()
         agent = {
@@ -230,7 +264,11 @@ def create_agent(org_slug):
             'created_at': now,
             'updated_at': now
         }
-        supabase.table('agents').insert(agent).execute()
+        current_app.logger.info(f"Creating agent: {agent}")
+
+        result = supabase.table('agents').insert(agent).execute()
+        current_app.logger.info(f"Agent created successfully: {result}")
+
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -308,6 +346,277 @@ def update_agent(org_slug, agent_id):
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@orgs_bp.route('/<org_slug>/agents/<agent_id>', methods=['GET'])
+@require_org_member('org_slug')
+def view_agent(org_slug, agent_id):
+    """View individual agent details and handle Email Summarizer functionality"""
+    try:
+        current_app.logger.info(f"Viewing agent: org_slug={org_slug}, agent_id={agent_id}")
+        supabase = get_service_supabase()
+
+        # Get organization
+        org_resp = supabase.table('organizations').select('*').eq('slug', org_slug).limit(1).execute()
+        if not org_resp.data:
+            flash('Organization not found.', 'error')
+            return redirect(url_for('main.dashboard'))
+        organization = org_resp.data[0]
+
+        # Get agent
+        agent_resp = supabase.table('agents').select('*').eq('id', agent_id).eq('org_id', organization['id']).execute()
+        if not agent_resp.data:
+            flash('Agent not found.', 'error')
+            return redirect(url_for('orgs.list_agents', org_slug=org_slug))
+        agent = agent_resp.data[0]
+
+        # Check if Gmail is connected for email_summarizer agents
+        gmail_connected = False
+        if agent['agent_type'] == 'email_summarizer':
+            config = agent.get('config', {})
+            gmail_connected = bool(config.get('gmail_refresh_token'))
+
+        return render_template('orgs/agent_detail.html',
+                             organization=organization,
+                             agent=agent,
+                             gmail_connected=gmail_connected)
+
+    except Exception as e:
+        current_app.logger.error(f"Error viewing agent: {e}")
+        flash('Error loading agent.', 'error')
+        return redirect(url_for('orgs.list_agents', org_slug=org_slug))
+
+@orgs_bp.route('/<org_slug>/agents/<agent_id>/gmail/auth')
+@require_org_member('org_slug')
+def gmail_auth(org_slug, agent_id):
+    """Initiate Gmail OAuth flow"""
+    try:
+        from urllib.parse import urlencode
+        import os
+
+        # Gmail OAuth configuration
+        client_id = os.getenv('GMAIL_CLIENT_ID')
+        if not client_id:
+            flash('Gmail OAuth not configured. Please contact administrator.', 'error')
+            return redirect(url_for('orgs.view_agent', org_slug=org_slug, agent_id=agent_id))
+
+        # OAuth parameters - use a fixed callback URL
+        redirect_uri = url_for('orgs.gmail_callback_handler', _external=True)
+        current_app.logger.info(f"Gmail OAuth redirect URI: {redirect_uri}")
+        params = {
+            'client_id': client_id,
+            'redirect_uri': redirect_uri,
+            'scope': 'https://www.googleapis.com/auth/gmail.readonly',
+            'response_type': 'code',
+            'access_type': 'offline',
+            'prompt': 'consent',
+            'state': f"{org_slug}:{agent_id}"
+        }
+
+        auth_url = f"https://accounts.google.com/o/oauth2/auth?{urlencode(params)}"
+        return redirect(auth_url)
+
+    except Exception as e:
+        current_app.logger.error(f"Error initiating Gmail auth: {e}")
+        flash('Error connecting to Gmail.', 'error')
+        return redirect(url_for('orgs.view_agent', org_slug=org_slug, agent_id=agent_id))
+
+@orgs_bp.route('/<org_slug>/agents/<agent_id>/gmail/callback')
+@require_org_member('org_slug')
+def gmail_callback(org_slug, agent_id):
+    """Handle Gmail OAuth callback"""
+    try:
+        import requests
+        import os
+
+        code = request.args.get('code')
+        state = request.args.get('state')
+        error = request.args.get('error')
+
+        if error:
+            flash(f'Gmail authorization failed: {error}', 'error')
+            return redirect(url_for('orgs.view_agent', org_slug=org_slug, agent_id=agent_id))
+
+        if not code:
+            flash('No authorization code received.', 'error')
+            return redirect(url_for('orgs.view_agent', org_slug=org_slug, agent_id=agent_id))
+
+        # Verify state parameter
+        expected_state = f"{org_slug}:{agent_id}"
+        if state != expected_state:
+            flash('Invalid state parameter.', 'error')
+            return redirect(url_for('orgs.view_agent', org_slug=org_slug, agent_id=agent_id))
+
+        # Exchange code for tokens
+        client_id = os.getenv('GMAIL_CLIENT_ID')
+        client_secret = os.getenv('GMAIL_CLIENT_SECRET')
+
+        redirect_uri = url_for('orgs.gmail_callback_handler', _external=True)
+        current_app.logger.info(f"Token exchange redirect URI: {redirect_uri}")
+        token_data = {
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'code': code,
+            'grant_type': 'authorization_code',
+            'redirect_uri': redirect_uri
+        }
+
+        token_response = requests.post('https://oauth2.googleapis.com/token', data=token_data)
+        token_json = token_response.json()
+
+        if 'error' in token_json:
+            flash(f'Token exchange failed: {token_json["error"]}', 'error')
+            return redirect(url_for('orgs.view_agent', org_slug=org_slug, agent_id=agent_id))
+
+        # Store refresh token in agent config
+        supabase = get_service_supabase()
+        config_update = {
+            'gmail_refresh_token': token_json.get('refresh_token'),
+            'gmail_access_token': token_json.get('access_token'),
+            'gmail_connected_at': datetime.utcnow().isoformat()
+        }
+
+        supabase.table('agents').update({
+            'config': config_update,
+            'updated_at': datetime.utcnow().isoformat()
+        }).eq('id', agent_id).execute()
+
+        flash('Gmail connected successfully!', 'success')
+        return redirect(url_for('orgs.view_agent', org_slug=org_slug, agent_id=agent_id))
+
+    except Exception as e:
+        current_app.logger.error(f"Error in Gmail callback: {e}")
+        flash('Error connecting Gmail account.', 'error')
+        return redirect(url_for('orgs.view_agent', org_slug=org_slug, agent_id=agent_id))
+
+@orgs_bp.route('/gmail/callback')
+def gmail_callback_handler():
+    """Fixed Gmail OAuth callback handler"""
+    try:
+        import requests
+        import os
+
+        code = request.args.get('code')
+        state = request.args.get('state')
+        error = request.args.get('error')
+
+        if error:
+            flash(f'Gmail authorization failed: {error}', 'error')
+            return redirect(url_for('main.dashboard'))
+
+        if not code or not state:
+            flash('Invalid OAuth response.', 'error')
+            return redirect(url_for('main.dashboard'))
+
+        # Parse state to get org_slug and agent_id
+        try:
+            org_slug, agent_id = state.split(':', 1)
+        except ValueError:
+            flash('Invalid state parameter.', 'error')
+            return redirect(url_for('main.dashboard'))
+
+        # Exchange code for tokens
+        client_id = os.getenv('GMAIL_CLIENT_ID')
+        client_secret = os.getenv('GMAIL_CLIENT_SECRET')
+
+        redirect_uri = url_for('orgs.gmail_callback_handler', _external=True)
+        current_app.logger.info(f"Main callback redirect URI: {redirect_uri}")
+        token_data = {
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'code': code,
+            'grant_type': 'authorization_code',
+            'redirect_uri': redirect_uri
+        }
+
+        token_response = requests.post('https://oauth2.googleapis.com/token', data=token_data)
+        token_json = token_response.json()
+
+        if 'error' in token_json:
+            flash(f'Token exchange failed: {token_json["error"]}', 'error')
+            return redirect(url_for('orgs.view_agent', org_slug=org_slug, agent_id=agent_id))
+
+        # Store refresh token in agent config
+        supabase = get_service_supabase()
+        config_update = {
+            'gmail_refresh_token': token_json.get('refresh_token'),
+            'gmail_access_token': token_json.get('access_token'),
+            'gmail_connected_at': datetime.utcnow().isoformat()
+        }
+
+        supabase.table('agents').update({
+            'config': config_update,
+            'updated_at': datetime.utcnow().isoformat()
+        }).eq('id', agent_id).execute()
+
+        flash('Gmail connected successfully!', 'success')
+        return redirect(url_for('orgs.view_agent', org_slug=org_slug, agent_id=agent_id))
+
+    except Exception as e:
+        current_app.logger.error(f"Error in Gmail callback: {e}")
+        flash('Error connecting Gmail account.', 'error')
+        return redirect(url_for('main.dashboard'))
+
+
+
+
+
+@orgs_bp.route('/<org_slug>/agents/<agent_id>/emails/summarize', methods=['POST'])
+@require_org_member('org_slug')
+def summarize_emails(org_slug, agent_id):
+    """Fetch and summarize emails based on criteria"""
+    try:
+        current_app.logger.info(f"Email summarize request: org_slug={org_slug}, agent_id={agent_id}")
+
+        data = request.get_json()
+        if not data:
+            current_app.logger.error("No JSON data received, using defaults")
+            data = {'type': 'last_24_hours', 'count': 10}
+
+        criteria_type = data.get('type', 'last_24_hours')
+        count = data.get('count', 10)
+        current_app.logger.info(f"Criteria: type={criteria_type}, count={count}")
+
+        supabase = get_service_supabase()
+
+        # Get agent and verify it's an email_summarizer
+        agent_resp = supabase.table('agents').select('*').eq('id', agent_id).execute()
+        if not agent_resp.data:
+            return jsonify({'error': 'Agent not found'}), 404
+
+        agent = agent_resp.data[0]
+        if agent['agent_type'] != 'email_summarizer':
+            return jsonify({'error': 'Agent is not an email summarizer'}), 400
+
+        config = agent.get('config', {})
+        refresh_token = config.get('gmail_refresh_token')
+
+        if not refresh_token:
+            return jsonify({'error': 'Gmail not connected'}), 400
+
+        # Check required environment variables
+        import os
+        if not os.getenv('GMAIL_CLIENT_ID'):
+            return jsonify({'error': 'Gmail OAuth not configured (missing GMAIL_CLIENT_ID)'}), 500
+        if not os.getenv('GMAIL_CLIENT_SECRET'):
+            return jsonify({'error': 'Gmail OAuth not configured (missing GMAIL_CLIENT_SECRET)'}), 500
+        if not os.getenv('OPENAI_API_KEY'):
+            return jsonify({'error': 'OpenAI API not configured. Please set the OPENAI_API_KEY environment variable.'}), 500
+
+        # Simple test response first
+        return jsonify({
+            'success': True,
+            'message': 'Email summarization endpoint is working',
+            'org_slug': org_slug,
+            'agent_id': agent_id,
+            'criteria_type': criteria_type,
+            'count': count
+        })
+
+    except Exception as e:
+        current_app.logger.error(f"Error summarizing emails: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 
 @orgs_bp.route('/<org_slug>/agents/<agent_id>', methods=['DELETE'])
 @require_org_admin('org_slug')

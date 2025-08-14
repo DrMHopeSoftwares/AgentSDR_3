@@ -1,0 +1,251 @@
+{% extends "layout.html" %}
+
+{% block title %}{{ agent.name }} - {{ organization.name }}{% endblock %}
+
+{% block content %}
+<div class="space-y-8" x-data="{
+    fetchingEmails: false,
+    fetchCriteria: 'last_24_hours',
+    customCount: 10,
+    summaries: [],
+    showSummaries: false,
+    error: null,
+    fetchAndSummarizeEmails() {
+        this.fetchingEmails = true;
+        this.error = null;
+        this.showSummaries = false;
+
+        const criteria = {
+            type: this.fetchCriteria,
+            count: this.customCount
+        };
+
+        console.log('Sending criteria:', criteria);
+
+        fetch(`/orgs/{{ organization.slug }}/agents/{{ agent.id }}/emails/summarize`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(criteria)
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.error) {
+                this.error = data.error;
+            } else {
+                this.summaries = data.summaries || [];
+                this.showSummaries = true;
+                if (this.summaries.length > 0) {
+                    showToast(`Summarized ${this.summaries.length} emails`, 'success');
+                }
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            this.error = `Failed to fetch and summarize emails: ${error.message}`;
+        })
+        .finally(() => {
+            this.fetchingEmails = false;
+        });
+    }
+}">
+    <!-- Enhanced Header -->
+    <div class="card-gradient rounded-xl shadow-lg overflow-hidden">
+        <div class="px-8 py-8 relative">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-4">
+                    <div class="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-sm">
+                        <span class="text-3xl">
+                            {% if agent.agent_type == 'email_summarizer' %}📧
+                            {% elif agent.agent_type == 'hubspot_data' %}🔗
+                            {% else %}🤖{% endif %}
+                        </span>
+                    </div>
+                    <div>
+                        <h1 class="text-3xl font-bold text-white">{{ agent.name }}</h1>
+                        <p class="text-white/80 text-lg">{{ agent.agent_type.replace('_', ' ').title() }}</p>
+                    </div>
+                </div>
+                <div class="flex space-x-3">
+                    <a href="{{ url_for('orgs.list_agents', org_slug=organization.slug) }}" 
+                       class="btn-gradient py-3 px-6 rounded-xl font-semibold transition-all duration-300 hover:scale-105">
+                        ← Back to Agents
+                    </a>
+                </div>
+            </div>
+            <div class="absolute top-4 right-4 text-white/10 text-6xl float-up">⚡</div>
+        </div>
+    </div>
+
+    {% if agent.agent_type == 'email_summarizer' %}
+    <!-- Email Summarizer Interface -->
+    <div class="bg-white rounded-xl shadow-lg p-8">
+        <div class="flex items-center space-x-3 mb-6">
+            <div class="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+                <span class="text-white text-lg">📧</span>
+            </div>
+            <h3 class="text-2xl font-bold text-gray-900">Email Summarizer</h3>
+        </div>
+
+        {% if not gmail_connected %}
+        <!-- Gmail Connection Required -->
+        <div class="text-center py-12">
+            <div class="w-20 h-20 bg-gradient-to-br from-red-500 to-pink-600 rounded-full flex items-center justify-center mx-auto mb-6">
+                <span class="text-3xl text-white">📧</span>
+            </div>
+            <h3 class="text-xl font-bold text-gray-900 mb-4">Gmail Connection Required</h3>
+            <p class="text-gray-600 mb-8 max-w-md mx-auto">
+                To start summarizing emails, you need to connect your Gmail account. This will allow the agent to access and summarize your emails.
+            </p>
+            <button onclick="connectGmail('{{ organization.slug }}', '{{ agent.id }}')" 
+                    class="btn-gradient inline-flex items-center py-4 px-8 rounded-xl font-semibold text-lg transition-all duration-300 hover:scale-105 pulse-glow">
+                🔗 Connect Gmail Account
+            </button>
+        </div>
+        {% else %}
+        <!-- Gmail Connected - Email Fetching Options -->
+        <div class="space-y-6">
+            <div class="flex items-center space-x-3 p-4 bg-green-50 rounded-lg border border-green-200">
+                <div class="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center">
+                    <span class="text-white text-sm">✓</span>
+                </div>
+                <div>
+                    <h4 class="font-semibold text-green-800">Gmail Connected</h4>
+                    <p class="text-green-600 text-sm">Your Gmail account is connected and ready to use.</p>
+                </div>
+            </div>
+
+            <!-- Email Fetching Options -->
+            <div>
+                <h4 class="text-lg font-semibold text-gray-900 mb-4">Choose Email Criteria</h4>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 reveal-list">
+                    <button type="button" 
+                            :class="fetchCriteria === 'last_24_hours' ? 'border-blue-500 bg-blue-50' : 'border-gray-300'"
+                            @click="fetchCriteria = 'last_24_hours'"
+                            class="border-2 rounded-lg p-4 text-left hover:border-blue-400 transition-colors">
+                        <div class="font-medium text-gray-900">Last 24 Hours</div>
+                        <div class="text-sm text-gray-600">Get emails from the past day</div>
+                    </button>
+                    
+                    <button type="button" 
+                            :class="fetchCriteria === 'last_7_days' ? 'border-blue-500 bg-blue-50' : 'border-gray-300'"
+                            @click="fetchCriteria = 'last_7_days'"
+                            class="border-2 rounded-lg p-4 text-left hover:border-blue-400 transition-colors">
+                        <div class="font-medium text-gray-900">Last 7 Days</div>
+                        <div class="text-sm text-gray-600">Get emails from the past week</div>
+                    </button>
+                    
+                    <button type="button" 
+                            :class="fetchCriteria === 'latest_n' ? 'border-blue-500 bg-blue-50' : 'border-gray-300'"
+                            @click="fetchCriteria = 'latest_n'"
+                            class="border-2 rounded-lg p-4 text-left hover:border-blue-400 transition-colors">
+                        <div class="font-medium text-gray-900">Latest N Emails</div>
+                        <div class="text-sm text-gray-600">Get the most recent emails</div>
+                        <div x-show="fetchCriteria === 'latest_n'" class="mt-2">
+                            <input type="number" x-model="customCount" min="1" max="100" 
+                                   class="w-20 px-2 py-1 border border-gray-300 rounded text-sm">
+                            <span class="text-sm text-gray-600 ml-1">emails</span>
+                        </div>
+                    </button>
+                    
+                    <button type="button" 
+                            :class="fetchCriteria === 'oldest_n' ? 'border-blue-500 bg-blue-50' : 'border-gray-300'"
+                            @click="fetchCriteria = 'oldest_n'"
+                            class="border-2 rounded-lg p-4 text-left hover:border-blue-400 transition-colors">
+                        <div class="font-medium text-gray-900">Oldest N Emails</div>
+                        <div class="text-sm text-gray-600">Get the oldest unread emails</div>
+                        <div x-show="fetchCriteria === 'oldest_n'" class="mt-2">
+                            <input type="number" x-model="customCount" min="1" max="100" 
+                                   class="w-20 px-2 py-1 border border-gray-300 rounded text-sm">
+                            <span class="text-sm text-gray-600 ml-1">emails</span>
+                        </div>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Fetch Button -->
+            <div class="text-center">
+                <button @click="fetchAndSummarizeEmails()" 
+                        :disabled="fetchingEmails"
+                        class="btn-gradient inline-flex items-center py-4 px-8 rounded-xl font-semibold text-lg transition-all duration-300 hover:scale-105"
+                        :class="{ 'opacity-50 cursor-not-allowed': fetchingEmails }">
+                    <span x-show="!fetchingEmails">📧 Fetch & Summarize Emails</span>
+                    <span x-show="fetchingEmails" class="flex items-center">
+                        <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Processing...
+                    </span>
+                </button>
+            </div>
+
+            <!-- Error Display -->
+            <div x-show="error" class="p-4 bg-red-50 border border-red-200 rounded-lg">
+                <div class="flex items-center">
+                    <span class="text-red-500 mr-2">❌</span>
+                    <span class="text-red-700" x-text="error"></span>
+                </div>
+            </div>
+
+            <!-- Email Summaries Display -->
+            <div x-show="showSummaries && summaries.length > 0" class="space-y-4">
+                <h4 class="text-lg font-semibold text-gray-900">📩 Email Summaries</h4>
+                <div class="space-y-3 max-h-96 overflow-y-auto">
+                    <template x-for="summary in summaries" :key="summary.id">
+                        <div class="card bg-gray-50 rounded-lg p-4 hover:shadow-md transition-all duration-200">
+                            <div class="flex items-start justify-between mb-2">
+                                <h5 class="font-semibold text-gray-900" x-text="`📩 From ${summary.sender} — ${summary.subject}`"></h5>
+                                <span class="text-sm text-gray-500" x-text="summary.date"></span>
+                            </div>
+                            <p class="text-gray-700" x-text="summary.summary"></p>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <!-- No Emails Found -->
+            <div x-show="showSummaries && summaries.length === 0" class="text-center py-8">
+                <div class="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <span class="text-2xl">📭</span>
+                </div>
+                <h3 class="text-lg font-medium text-gray-900 mb-2">No Emails Found</h3>
+                <p class="text-gray-500">No emails match the selected criteria.</p>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+    {% else %}
+    <!-- Other Agent Types -->
+    <div class="bg-white rounded-xl shadow-lg p-8 text-center">
+        <div class="w-20 h-20 bg-gradient-to-br from-gray-400 to-gray-600 rounded-full flex items-center justify-center mx-auto mb-6">
+            <span class="text-4xl text-white">🤖</span>
+        </div>
+        <h3 class="text-2xl font-bold text-gray-900 mb-4">{{ agent.agent_type.replace('_', ' ').title() }}</h3>
+        <p class="text-gray-600 text-lg mb-8">
+            This agent type is not yet implemented. Coming soon!
+        </p>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+async function connectGmail(orgSlug, agentId) {
+    try {
+        // Redirect to Gmail OAuth
+        window.location.href = `/orgs/${orgSlug}/agents/${agentId}/gmail/auth`;
+    } catch (error) {
+        console.error('Error connecting Gmail:', error);
+        alert('Failed to connect Gmail. Please try again.');
+    }
+}
+
+
+</script>
+{% endblock %}

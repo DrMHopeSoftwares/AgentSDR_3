@@ -3,53 +3,68 @@
 {% block title %}Create Organization - AgentSDR{% endblock %}
 
 {% block content %}
-<div class="min-h-screen bg-secondary-50 py-12 px-4 sm:px-6 lg:px-8">
+<div class="min-h-screen hero-gradient py-12 px-4 sm:px-6 lg:px-8">
     <div class="max-w-2xl mx-auto">
-        <div class="bg-white shadow rounded-lg p-6">
-            <div class="mb-6">
-                <h2 class="text-2xl font-bold text-secondary-900">Create New Organization</h2>
-                <p class="mt-2 text-sm text-secondary-600">
-                    Create an organization to manage your team and projects.
+        <!-- Enhanced Header -->
+        <div class="text-center mb-8 page-fade-enter page-fade-enter-active">
+            <div class="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-6 backdrop-blur-sm">
+                <span class="text-4xl">🏢</span>
+            </div>
+            <h1 class="text-4xl font-bold text-white mb-4">
+                Create Organization
+            </h1>
+            <p class="text-white/80 text-lg">
+                Build your team and manage projects together
+            </p>
+        </div>
+
+        <div class="bg-white/10 backdrop-blur-md rounded-2xl shadow-2xl p-8 border border-white/20">
+            <div class="mb-8">
+                <h2 class="text-2xl font-bold text-white mb-2">Organization Details</h2>
+                <p class="text-white/80">
+                    Let's set up your organization workspace
                 </p>
             </div>
 
             <form id="createOrgForm" class="space-y-6">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 
-                <div>
-                    <label for="name" class="block text-sm font-medium text-secondary-700">
-                        Organization Name
-                    </label>
-                    <input type="text" id="name" name="name" required
-                           class="mt-1 block w-full border-secondary-300 rounded-md shadow-sm focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
-                           placeholder="My Company">
-                </div>
-
-                <div>
-                    <label for="slug" class="block text-sm font-medium text-secondary-700">
-                        Organization Slug
-                    </label>
-                    <div class="mt-1 flex rounded-md shadow-sm">
-                        <span class="inline-flex items-center px-3 rounded-l-md border border-r-0 border-secondary-300 bg-secondary-50 text-secondary-500 text-sm">
-                            localhost:5000/orgs/
-                        </span>
-                        <input type="text" id="slug" name="slug" required
-                               class="flex-1 block w-full rounded-none rounded-r-md border-secondary-300 focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
-                               placeholder="my-company">
+                <div class="space-y-6">
+                    <div>
+                        <label for="name" class="block text-sm font-medium text-white/90 mb-2">
+                            🏢 Organization Name
+                        </label>
+                        <input type="text" id="name" name="name" required
+                               class="w-full px-4 py-3 bg-white/20 border border-white/30 rounded-xl text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-yellow-300 focus:border-transparent backdrop-blur-sm transition-all duration-200"
+                               placeholder="My Awesome Company">
                     </div>
-                    <p class="mt-2 text-sm text-secondary-500">
-                        This will be used in your organization's URL. Only letters, numbers, and hyphens are allowed.
-                    </p>
+
+                    <div>
+                        <label for="slug" class="block text-sm font-medium text-white/90 mb-2">
+                            🔗 Organization URL
+                        </label>
+                        <div class="flex rounded-xl overflow-hidden">
+                            <span class="inline-flex items-center px-4 bg-white/30 text-white/80 text-sm font-medium backdrop-blur-sm">
+                                agentsdr.com/orgs/
+                            </span>
+                            <input type="text" id="slug" name="slug" required
+                                   class="flex-1 px-4 py-3 bg-white/20 border border-white/30 border-l-0 text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-yellow-300 focus:border-transparent backdrop-blur-sm transition-all duration-200"
+                                   placeholder="my-awesome-company">
+                        </div>
+                        <p class="mt-2 text-sm text-white/70">
+                            💡 This creates your unique organization URL. Only letters, numbers, and hyphens allowed.
+                        </p>
+                    </div>
                 </div>
 
-                <div class="flex justify-end space-x-3">
-                    <a href="{{ url_for('main.dashboard') }}" 
-                       class="inline-flex justify-center py-2 px-4 border border-secondary-300 shadow-sm text-sm font-medium rounded-md text-secondary-700 bg-white hover:bg-secondary-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500">
-                        Cancel
+                <div class="flex justify-end space-x-4 pt-6">
+                    <a href="{{ url_for('main.dashboard') }}"
+                       class="inline-flex justify-center py-3 px-6 border-2 border-white/30 text-sm font-semibold rounded-xl text-white bg-white/10 hover:bg-white/20 backdrop-blur-sm transition-all duration-300 hover:scale-105">
+                        ← Cancel
                     </a>
                     <button type="submit"
-                            class="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500">
-                        Create Organization
+                            class="btn-gradient inline-flex justify-center py-3 px-8 text-sm font-semibold rounded-xl transition-all duration-300 hover:scale-105 pulse-glow">
+                        🚀 Create Organization
                     </button>
                 </div>
             </form>
