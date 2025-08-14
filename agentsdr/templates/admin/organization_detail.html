@@ -1,0 +1,53 @@
+{% extends "layout.html" %}
+{% block title %}Organization - Admin{% endblock %}
+{% block content %}
+<div class="space-y-6">
+  <div class="flex justify-between items-center">
+    <div>
+      <h1 class="text-2xl font-bold">{{ organization.name }}</h1>
+      <div class="text-sm text-secondary-500">{{ organization.slug }}</div>
+    </div>
+    <a class="btn btn-secondary" href="{{ url_for('admin.list_organizations') }}">Back</a>
+  </div>
+
+  <div class="bg-white shadow rounded-lg p-6">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div class="border rounded p-4"><div class="text-sm text-secondary-500">Members</div><div class="text-2xl font-bold">{{ members|length }}</div></div>
+      <div class="border rounded p-4"><div class="text-sm text-secondary-500">Records</div><div class="text-2xl font-bold">{{ records_count }}</div></div>
+      <div></div>
+    </div>
+  </div>
+
+  <div class="bg-white shadow rounded-lg p-6">
+    <h3 class="text-lg font-medium mb-3">Members</h3>
+    <div class="divide-y">
+      {% for m in members %}
+      <div class="py-3 flex justify-between items-center">
+        <div>
+          <div class="font-medium">{{ m.display_name or m.email }}</div>
+          <div class="text-xs text-secondary-500">{{ m.email }}</div>
+        </div>
+        <span class="text-xs px-2 py-0.5 rounded bg-secondary-100 text-secondary-700">{{ m.role }}</span>
+      </div>
+      {% else %}
+      <div class="text-secondary-500">No members.</div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="bg-white shadow rounded-lg p-6">
+    <h3 class="text-lg font-medium mb-3">Recent Records</h3>
+    <div class="space-y-2">
+      {% for r in recent_records %}
+      <div class="border rounded p-3 flex justify-between items-center">
+        <div>{{ r.title or 'Untitled' }}</div>
+        <div class="text-xs text-secondary-500">{{ r.created_at.split('T')[0] }}</div>
+      </div>
+      {% else %}
+      <div class="text-secondary-500">No records.</div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}
+

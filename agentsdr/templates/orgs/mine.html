@@ -1,0 +1,52 @@
+{% extends "layout.html" %}
+
+{% block title %}My Organizations - AgentSDR{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="bg-white shadow rounded-lg">
+        <div class="px-4 py-5 sm:p-6">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg leading-6 font-medium text-secondary-900">
+                    My Organizations
+                </h3>
+                <a href="{{ url_for('orgs.create_organization') }}" class="btn btn-primary">
+                    Create Organization
+                </a>
+            </div>
+            
+            {% if organizations %}
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {% for item in organizations %}
+                <div class="card">
+                    <div class="card-body">
+                        <div class="flex items-center justify-between">
+                            <h4 class="text-lg font-medium text-secondary-900">{{ item.org.name }}</h4>
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium 
+                                       {% if item.role == 'admin' %}bg-blue-100 text-blue-800{% else %}bg-green-100 text-green-800{% endif %}">
+                                {{ item.role }}
+                            </span>
+                        </div>
+                        <p class="mt-1 text-sm text-secondary-500">{{ item.org.slug }}</p>
+                        <div class="mt-4">
+                            <a href="{{ url_for('orgs.manage_organization', org_slug=item.org.slug) }}" class="btn btn-primary text-sm">Manage Org</a>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="text-center py-16">
+                <h4 class="text-md font-medium text-secondary-900">You are not a member of any organization yet.</h4>
+                <p class="mt-2 text-sm text-secondary-500">Create a new organization to get started.</p>
+                <div class="mt-6">
+                    <a href="{{ url_for('orgs.create_organization') }}" class="btn btn-primary">
+                        Create Organization
+                    </a>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

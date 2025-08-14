@@ -1,0 +1,114 @@
+{% extends "layout.html" %}
+
+{% block title %}Create Organization - AgentSDR{% endblock %}
+
+{% block content %}
+<div class="min-h-screen bg-secondary-50 py-12 px-4 sm:px-6 lg:px-8">
+    <div class="max-w-2xl mx-auto">
+        <div class="bg-white shadow rounded-lg p-6">
+            <div class="mb-6">
+                <h2 class="text-2xl font-bold text-secondary-900">Create New Organization</h2>
+                <p class="mt-2 text-sm text-secondary-600">
+                    Create an organization to manage your team and projects.
+                </p>
+            </div>
+
+            <form id="createOrgForm" class="space-y-6">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+
+                <div>
+                    <label for="name" class="block text-sm font-medium text-secondary-700">
+                        Organization Name
+                    </label>
+                    <input type="text" id="name" name="name" required
+                           class="mt-1 block w-full border-secondary-300 rounded-md shadow-sm focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
+                           placeholder="My Company">
+                </div>
+
+                <div>
+                    <label for="slug" class="block text-sm font-medium text-secondary-700">
+                        Organization Slug
+                    </label>
+                    <div class="mt-1 flex rounded-md shadow-sm">
+                        <span class="inline-flex items-center px-3 rounded-l-md border border-r-0 border-secondary-300 bg-secondary-50 text-secondary-500 text-sm">
+                            localhost:5000/orgs/
+                        </span>
+                        <input type="text" id="slug" name="slug" required
+                               class="flex-1 block w-full rounded-none rounded-r-md border-secondary-300 focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
+                               placeholder="my-company">
+                    </div>
+                    <p class="mt-2 text-sm text-secondary-500">
+                        This will be used in your organization's URL. Only letters, numbers, and hyphens are allowed.
+                    </p>
+                </div>
+
+                <div class="flex justify-end space-x-3">
+                    <a href="{{ url_for('main.dashboard') }}" 
+                       class="inline-flex justify-center py-2 px-4 border border-secondary-300 shadow-sm text-sm font-medium rounded-md text-secondary-700 bg-white hover:bg-secondary-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500">
+                        Cancel
+                    </a>
+                    <button type="submit"
+                            class="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500">
+                        Create Organization
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+// Auto-generate slug from name
+document.getElementById('name').addEventListener('input', function() {
+    const name = this.value;
+    const slug = name.toLowerCase()
+        .replace(/[^a-z0-9\s-]/g, '')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+    document.getElementById('slug').value = slug;
+});
+
+// Handle form submission
+document.getElementById('createOrgForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+
+    const formData = new FormData(this);
+    const data = {
+        name: formData.get('name'),
+        slug: formData.get('slug'),
+        csrf_token: formData.get('csrf_token')
+    };
+
+    console.log('Submitting organization data:', data);
+
+    fetch('{{ url_for("orgs.create_organization") }}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': data.csrf_token
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => {
+        console.log('Response status:', response.status);
+        return response.json();
+    })
+    .then(data => {
+        console.log('Response data:', data);
+        if (data.error) {
+            alert('Error: ' + data.error);
+        } else if (data.redirect) {
+            window.location.href = data.redirect;
+        } else {
+            alert('Organization created successfully!');
+            window.location.href = '/dashboard';
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('An error occurred while creating the organization. Check the console for details.');
+    });
+});
+</script>
+{% endblock %}

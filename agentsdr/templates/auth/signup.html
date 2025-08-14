@@ -1,0 +1,66 @@
+{% extends "layout.html" %}
+
+{% block title %}Sign Up - AgentSDR{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-center justify-center bg-secondary-50 py-12 px-4 sm:px-6 lg:px-8">
+    <div class="max-w-md w-full space-y-8">
+        <div>
+            <h2 class="mt-6 text-center text-3xl font-extrabold text-secondary-900">
+                Create your account
+            </h2>
+            <p class="mt-2 text-center text-sm text-secondary-600">
+                Or
+                <a href="{{ url_for('auth.login') }}" class="font-medium text-primary-600 hover:text-primary-500">
+                    sign in to your existing account
+                </a>
+            </p>
+        </div>
+        <form class="mt-8 space-y-6" method="POST">
+            {{ form.hidden_tag() }}
+            <div class="rounded-md shadow-sm -space-y-px">
+                <div>
+                    <label for="{{ form.email.id }}" class="sr-only">Email address</label>
+                    {{ form.email(class="form-input rounded-t-md", placeholder="Email address") }}
+                    {% if form.email.errors %}
+                        {% for error in form.email.errors %}
+                            <p class="mt-1 text-sm text-red-600">{{ error }}</p>
+                        {% endfor %}
+                    {% endif %}
+                </div>
+                <div>
+                    <label for="{{ form.display_name.id }}" class="sr-only">Display name</label>
+                    {{ form.display_name(class="form-input", placeholder="Display name") }}
+                    {% if form.display_name.errors %}
+                        {% for error in form.display_name.errors %}
+                            <p class="mt-1 text-sm text-red-600">{{ error }}</p>
+                        {% endfor %}
+                    {% endif %}
+                </div>
+                <div>
+                    <label for="{{ form.password.id }}" class="sr-only">Password</label>
+                    {{ form.password(class="form-input", placeholder="Password") }}
+                    {% if form.password.errors %}
+                        {% for error in form.password.errors %}
+                            <p class="mt-1 text-sm text-red-600">{{ error }}</p>
+                        {% endfor %}
+                    {% endif %}
+                </div>
+                <div>
+                    <label for="{{ form.confirm_password.id }}" class="sr-only">Confirm password</label>
+                    {{ form.confirm_password(class="form-input rounded-b-md", placeholder="Confirm password") }}
+                    {% if form.confirm_password.errors %}
+                        {% for error in form.confirm_password.errors %}
+                            <p class="mt-1 text-sm text-red-600">{{ error }}</p>
+                        {% endfor %}
+                    {% endif %}
+                </div>
+            </div>
+
+            <div>
+                {{ form.submit(class="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500") }}
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
