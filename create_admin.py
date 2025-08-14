@@ -110,8 +110,6 @@ def create_super_admin_simple():
 
         return False
 
-
-
 if __name__ == "__main__":
     print("🚀 AgentSDR Super Admin Creator")
     print("=" * 40)
