@@ -38,15 +38,23 @@ def create_app(config_name=None):
     app.register_blueprint(orgs_bp, url_prefix='/orgs')
     app.register_blueprint(records_bp, url_prefix='/records')
     app.register_blueprint(admin_bp, url_prefix='/admin')
-    
+
     # Register main routes
     from agentsdr.main import main_bp
     app.register_blueprint(main_bp)
-    
+
+    # Exempt JSON API routes from CSRF where appropriate
+    try:
+        from agentsdr.orgs.routes import summarize_emails
+        csrf.exempt(summarize_emails)
+    except Exception:
+        # If import fails during certain tooling or tests, skip exemption
+        pass
+
     # User loader for Flask-Login
     from agentsdr.auth.models import User
     @login_manager.user_loader
     def load_user(user_id):
         return User.get_by_id(user_id)
-    
+
     return app

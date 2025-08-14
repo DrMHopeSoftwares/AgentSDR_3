@@ -602,19 +602,34 @@ def summarize_emails(org_slug, agent_id):
         if not os.getenv('OPENAI_API_KEY'):
             return jsonify({'error': 'OpenAI API not configured. Please set the OPENAI_API_KEY environment variable.'}), 500
 
-        # Simple test response first
-        return jsonify({
-            'success': True,
-            'message': 'Email summarization endpoint is working',
-            'org_slug': org_slug,
-            'agent_id': agent_id,
-            'criteria_type': criteria_type,
-            'count': count
-        })
+        # Fetch and summarize emails
+        try:
+            current_app.logger.info(f"Starting email summarization for agent {agent_id}")
+            summaries = fetch_and_summarize_emails(refresh_token, criteria_type, count)
+            
+            current_app.logger.info(f"Email summarization completed successfully with {len(summaries)} summaries")
+            return jsonify({
+                'success': True,
+                'summaries': summaries,
+                'count': len(summaries),
+                'message': 'No emails matched the selected criteria' if not summaries else None
+            })
+            
+        except Exception as fetch_error:
+            current_app.logger.error(f"Error in email fetching/summarization: {fetch_error}")
+            # Check if it's a token-related error
+            if 'token' in str(fetch_error).lower() or 'auth' in str(fetch_error).lower():
+                return jsonify({'error': 'Gmail authentication failed. Please reconnect your Gmail account.'}), 401
+            elif 'quota' in str(fetch_error).lower() or 'rate' in str(fetch_error).lower():
+                return jsonify({'error': 'Rate limit exceeded. Please try again in a few minutes.'}), 429
+            else:
+                return jsonify({'error': f'Failed to fetch emails: {str(fetch_error)}'}), 500
 
     except Exception as e:
-        current_app.logger.error(f"Error summarizing emails: {e}")
-        return jsonify({'error': str(e)}), 500
+        current_app.logger.error(f"Error in summarize_emails endpoint: {e}")
+        import traceback
+        current_app.logger.error(f"Full traceback: {traceback.format_exc()}")
+        return jsonify({'error': 'An unexpected error occurred. Please try again.'}), 500
 
 
 

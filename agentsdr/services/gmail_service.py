@@ -18,11 +18,12 @@ class GmailService:
     def __init__(self):
         self.client_id = os.getenv('GMAIL_CLIENT_ID')
         self.client_secret = os.getenv('GMAIL_CLIENT_SECRET')
-        openai.api_key = os.getenv('OPENAI_API_KEY')
+        self.openai_api_key = os.getenv('OPENAI_API_KEY')
     
     def get_access_token(self, refresh_token: str) -> str:
         """Get a fresh access token using refresh token"""
         try:
+            current_app.logger.info("Refreshing Gmail access token")
             token_data = {
                 'client_id': self.client_id,
                 'client_secret': self.client_secret,
@@ -31,11 +32,23 @@ class GmailService:
             }
             
             response = requests.post('https://oauth2.googleapis.com/token', data=token_data)
+            current_app.logger.info(f"Token refresh response status: {response.status_code}")
+            
+            if response.status_code != 200:
+                current_app.logger.error(f"Token refresh failed with status {response.status_code}: {response.text}")
+                raise Exception(f"Token refresh failed with status {response.status_code}")
+            
             token_json = response.json()
             
             if 'error' in token_json:
-                raise Exception(f"Token refresh failed: {token_json['error']}")
+                current_app.logger.error(f"Token refresh error: {token_json}")
+                raise Exception(f"Token refresh failed: {token_json['error']} - {token_json.get('error_description', '')}")
             
+            if 'access_token' not in token_json:
+                current_app.logger.error(f"No access token in response: {token_json}")
+                raise Exception("No access token received from refresh request")
+            
+            current_app.logger.info("Access token refreshed successfully")
             return token_json['access_token']
             
         except Exception as e:
@@ -45,6 +58,7 @@ class GmailService:
     def build_gmail_service(self, refresh_token: str):
         """Build Gmail API service with fresh credentials"""
         try:
+            current_app.logger.info("Building Gmail service")
             access_token = self.get_access_token(refresh_token)
             
             credentials = Credentials(
@@ -55,7 +69,11 @@ class GmailService:
                 token_uri='https://oauth2.googleapis.com/token'
             )
             
+            # Set up automatic token refresh (don't refresh now, let it refresh when needed)
+            # credentials.refresh(Request())
+            
             service = build('gmail', 'v1', credentials=credentials)
+            current_app.logger.info("Gmail service built successfully")
             return service
             
         except Exception as e:
@@ -64,30 +82,34 @@ class GmailService:
     
     def get_query_for_criteria(self, criteria_type: str, count: int = 10) -> str:
         """Build Gmail search query based on criteria"""
+        # Use Gmail's search operators to better match the UI semantics
+        # Docs: https://support.google.com/mail/answer/7190
         if criteria_type == 'last_24_hours':
-            yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y/%m/%d')
-            return f'after:{yesterday}'
+            return 'in:inbox newer_than:1d'
         elif criteria_type == 'last_7_days':
-            week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y/%m/%d')
-            return f'after:{week_ago}'
-        elif criteria_type in ['latest_n', 'oldest_n']:
-            return 'in:inbox'  # We'll handle sorting in the API call
+            return 'in:inbox newer_than:7d'
+        elif criteria_type == 'latest_n':
+            return 'in:inbox'
+        elif criteria_type == 'oldest_n':
+            return 'in:inbox is:unread'
         else:
             return 'in:inbox'
     
     def fetch_emails(self, refresh_token: str, criteria_type: str, count: int = 10) -> List[Dict[str, Any]]:
         """Fetch emails from Gmail based on criteria"""
         try:
+            current_app.logger.info(f"Fetching emails: criteria={criteria_type}, count={count}")
             service = self.build_gmail_service(refresh_token)
             query = self.get_query_for_criteria(criteria_type, count)
+            current_app.logger.info(f"Using Gmail query: {query}")
             
             # Get message IDs
             if criteria_type == 'oldest_n':
-                # For oldest emails, we need to search differently
+                # Fetch a bit more to allow sorting by oldest then slice
                 results = service.users().messages().list(
                     userId='me',
                     q=query,
-                    maxResults=count
+                    maxResults=min(max(count * 3, count), 100)
                 ).execute()
             else:
                 results = service.users().messages().list(
@@ -97,14 +119,17 @@ class GmailService:
                 ).execute()
             
             messages = results.get('messages', [])
+            current_app.logger.info(f"Found {len(messages)} messages")
             
             if not messages:
+                current_app.logger.info("No messages found matching criteria")
                 return []
             
             # Fetch full message details
             emails = []
-            for message in messages:
+            for i, message in enumerate(messages):
                 try:
+                    current_app.logger.info(f"Fetching message {i+1}/{len(messages)}: {message['id']}")
                     msg = service.users().messages().get(
                         userId='me',
                         id=message['id'],
@@ -328,6 +353,12 @@ class GmailService:
     def summarize_single_email(self, email: Dict[str, Any]) -> str:
         """Summarize a single email using OpenAI"""
         try:
+            current_app.logger.info(f"Summarizing single email from {email['sender']}")
+            
+            if not self.openai_api_key:
+                current_app.logger.error("OpenAI API key not configured")
+                return f"Email from {email['sender']} regarding {email['subject']}"
+            
             prompt = f"""
             Please summarize this email in 1-3 concise sentences. Focus on the main purpose and any action items.
 
@@ -340,7 +371,7 @@ class GmailService:
             Summary:
             """
 
-            client = openai.OpenAI()
+            client = openai.OpenAI(api_key=self.openai_api_key)
             response = client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
@@ -351,7 +382,9 @@ class GmailService:
                 temperature=0.3
             )
 
-            return response.choices[0].message.content.strip()
+            summary = response.choices[0].message.content.strip()
+            current_app.logger.info("Single email summarization completed successfully")
+            return summary
 
         except Exception as e:
             current_app.logger.error(f"Error in single email summarization: {e}")
@@ -375,7 +408,7 @@ class GmailService:
             Summary:
             """
 
-            client = openai.OpenAI()
+            client = openai.OpenAI(api_key=self.openai_api_key)
             response = client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
@@ -400,19 +433,36 @@ class GmailService:
 def fetch_and_summarize_emails(refresh_token: str, criteria_type: str, count: int = 10) -> List[Dict[str, Any]]:
     """Main function to fetch and summarize emails"""
     try:
+        current_app.logger.info(f"Starting email fetch and summarization process")
         gmail_service = GmailService()
+        
+        # Validate inputs
+        if not refresh_token:
+            raise ValueError("Refresh token is required")
+        if not criteria_type:
+            raise ValueError("Criteria type is required")
+        if count <= 0:
+            raise ValueError("Count must be greater than 0")
+            
+        current_app.logger.info(f"Fetching emails with criteria: {criteria_type}, count: {count}")
         
         # Fetch emails
         emails = gmail_service.fetch_emails(refresh_token, criteria_type, count)
         
         if not emails:
+            current_app.logger.info("No emails found to summarize")
             return []
+        
+        current_app.logger.info(f"Found {len(emails)} emails, starting summarization")
         
         # Summarize emails
         summaries = gmail_service.summarize_with_openai(emails)
         
+        current_app.logger.info(f"Successfully created {len(summaries)} summaries")
         return summaries
         
     except Exception as e:
         current_app.logger.error(f"Error in fetch_and_summarize_emails: {e}")
+        import traceback
+        current_app.logger.error(f"Full traceback: {traceback.format_exc()}")
         raise
